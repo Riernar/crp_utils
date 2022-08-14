@@ -61,22 +61,18 @@
 // Lesf-associativity is handled by the eager consuming of all operators
 // of the same priority, and then using a left-reduce on the resulting array
 
-Addition<T>
-    = head:Multiplication<T> ws* tail:( ws* ("+" / "-" ) ws* Multiplication<T>)+ {
-        return makeBinaryOperator(head, tail, 1, 3);
-    }
-    / Multiplication<T>
+
 
 Start =
     Expression
 
 // 0. Template rules
 
-//Addition<T>
-//    = head:Multiplication<T> ws* tail:( ws* ("+" / "-" ) ws* Multiplication<T>)+ {
-//        return makeBinaryOperator(head, tail, 1, 3);
-//    }
-//    / Multiplication<T>
+Addition<T>
+    = head:Multiplication<T> ws* tail:( ws* ("+" / "-" ) ws* Multiplication<T>)+ {
+        return makeBinaryOperator(head, tail, 1, 3);
+    }
+    / Multiplication<T>
 
 Multiplication<T>
     = head:Exponentiation<T> ws* tail:(ws* ("*" / "/" / "%") ws* Exponentiation<T>)+ {

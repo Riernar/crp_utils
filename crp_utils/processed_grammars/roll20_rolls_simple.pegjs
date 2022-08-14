@@ -43,9 +43,6 @@
 Start
   = Expression
 
-Expression
-  = Addition
-
 Addition
   = head:Multiplication ws* tail:(ws* "+"
   / "-" ws* Multiplication)+ {
@@ -62,10 +59,13 @@ Multiplication
   / Exponentiation
 
 Exponentiation
-  = head:Term tail:("**" Term)+ {
+  = head:T tail:("**" T)+ {
           return makeBinaryOperator(head, tail);
       }
-  / Term
+  / T
+
+Expression
+  = Addition
 
 Term
   = LabelledTerm

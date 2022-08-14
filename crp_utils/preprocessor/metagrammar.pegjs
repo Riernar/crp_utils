@@ -130,163 +130,178 @@
         }
 
       });
-    }
+    },
+    "resolve": function(node, error, context={}) {
+      const name = "resolve$" + node.type;
+      const resolver = (name in _helpers) ? _helpers[name] : null;
+      if (resolver === null) {
+          error("Undefined resolver " + name, node.location);
+      }
+      return resolver(node, error, context);
+
+    },
+    "resolve$grammar": function(grammar, error, context={}) {
+      grammar.definitions = grammar.definitions.map(def => _helpers.resolve(def, error, context));
+      return grammar;
+    },
+
   }
 
-    const format = function (node, error) {
-        const name = "format$" + node.type;
-        const formatter = (name in FORMATTERS) ? FORMATTERS[name] : null;
-        if (formatter === null) {
-            error("Undefined formatter " + name, node.location);
-        }
-        return formatter(node, error);
-    }
+  const format = function (node, error) {
+      const name = "format$" + node.type;
+      const formatter = (name in FORMATTERS) ? FORMATTERS[name] : null;
+      if (formatter === null) {
+          error("Undefined formatter " + name, node.location);
+      }
+      return formatter(node, error);
+  }
 
-    const FORMATTERS = {
-        "format$grammar": function(node, error) {
-          const parts = [];
-          if (node.topLevelInitializer !== null) {
-            parts.push(format(node.topLevelInitializer, error));
-            parts.push("\n");
-          }
-          if (node.initializer !== null) {
-            parts.push(format(node.initializer, error));
-            parts.push("\n");
-          }
-          parts.push(...node.rules.map((rule) => format(rule, error)));
-          return parts.join("\n\n");
+  const FORMATTERS = {
+      "format$grammar": function(node, error) {
+        const parts = [];
+        if (node.topLevelInitializer !== null) {
+          parts.push(format(node.topLevelInitializer, error));
+          parts.push("\n");
+        }
+        if (node.initializer !== null) {
+          parts.push(format(node.initializer, error));
+          parts.push("\n");
+        }
+        parts.push(...node.definitions.map((rule) => format(rule, error)));
+        return parts.join("\n\n");
+      },
+      "format$top_level_initializer": function(node, error) {
+        return "{{" + node.code + "}}";
+      },
+      "format$initializer": function(node, error) {
+        return "{" + node.code + "}";
+      },
+      "format$rule": function(node, error) {
+        const parts = [node.name];
+        let expression = node.expression;
+        if (node.expression.type == "named") {
+          parts.push(" \"");
+          parts.push(node.expression.name);
+          parts.push("\"");
+          expression = node.expression.expression;
+        }
+        parts.push("\n  = ");
+        parts.push(_helpers.indent(format(expression, error)).slice(2));
+        return parts.join("");
+      },
+      "format$template": function(node, error) {
+        return FORMATTERS.format$rule(node, error);
+      },
+      "format$choice": function(node, error) {
+        return node.alternatives.map((rule) => format(rule, error)).join("\n/ ");
+      },
+      "format$action": function(node, error) {
+        return format(node.expression, error) + " {" + node.code + "}";
+      },
+      "format$sequence": function(node, error) {
+        return node.elements.map((elem) => format(elem, error)).join(" ");
+      },
+      "format$labeled": function(node, error) {
+        const parts = [];
+        if (node.pick) {
+          parts.push("@");
+        }
+        if (node.label !== null) {
+          parts.push(node.label + ":");
+        }
+        parts.push(format(node.expression, error));
+        return parts.join("");
+      },
+      ...Object.entries(OPS_TO_PREFIXED_TYPES).reduce(
+        function (obj, keyval) {
+          const op = keyval[0];
+          obj["format$" + keyval[1]] = function(node, error) {
+            return op + format(node.expression, error);
+          };
+          return obj;
         },
-        "format$top_level_initializer": function(node, error) {
-          return "{{" + node.code + "}}";
+        {}
+      ),
+      ...Object.entries(OPS_TO_SUFFIXED_TYPES).reduce(
+        function (obj, keyval) {
+          const op = keyval[0];
+          obj["format$" + keyval[1]] = function(node, error) {
+            return format(node.expression, error) + op;
+          };
+          return obj;
         },
-        "format$initializer": function(node, error) {
-          return "{" + node.code + "}";
-        },
-        "format$rule": function(node, error) {
-          const parts = [node.name];
-          let expression = node.expression;
-          if (node.expression.type == "named") {
-            parts.push(" \"");
-            parts.push(node.expression.name);
-            parts.push("\"");
-            expression = node.expression.expression;
-          }
-          parts.push("\n  = ");
-          parts.push(_helpers.indent(format(expression, error)).slice(2));
-          return parts.join("");
-        },
-        "format$template": function(node, error) {
-          return FORMATTERS.format$rule(node, error);
-        },
-        "format$choice": function(node, error) {
-          return node.alternatives.map((rule) => format(rule, error)).join("\n/ ");
-        },
-        "format$action": function(node, error) {
-          return format(node.expression, error) + " {" + node.code + "}";
-        },
-        "format$sequence": function(node, error) {
-          return node.elements.map((elem) => format(elem, error)).join(" ");
-        },
-        "format$labeled": function(node, error) {
-          const parts = [];
-          if (node.pick) {
-            parts.push("@");
-          }
-          if (node.label !== null) {
-            parts.push(node.label + ":");
-          }
-          parts.push(format(node.expression, error));
-          return parts.join("");
-        },
-        ...Object.entries(OPS_TO_PREFIXED_TYPES).reduce(
-          function (obj, keyval) {
-            const op = keyval[0];
-            obj["format$" + keyval[1]] = function(node, error) {
-              return op + format(node.expression, error);
-            };
-            return obj;
-          },
-          {}
-        ),
-        ...Object.entries(OPS_TO_SUFFIXED_TYPES).reduce(
-          function (obj, keyval) {
-            const op = keyval[0];
-            obj["format$" + keyval[1]] = function(node, error) {
-              return format(node.expression, error) + op;
-            };
-            return obj;
-          },
-          {}
-        ),
-        "format$literal": function(node, error) {
-          if (node.value.includes('"')) {
-            return "'" + node.value + "'" + (node.ignoreCase ? "i" : "");
-          } else {
-            return '"' + node.value + '"' + (node.ignoreCase ? "i" : "");
-          }
-        },
-        "format$class": function(node, error) {
-          return (
-            "["
-            + (node.inverted ? "^" : "")
-            + node.parts.map(
-              (part) => {
-                if (typeof part === "string") {
-                  return _helpers.escape(part);
-                } else {
-                  return part.join("-");
-                }
+        {}
+      ),
+      "format$literal": function(node, error) {
+        if (node.value.includes('"')) {
+          return "'" + node.value + "'" + (node.ignoreCase ? "i" : "");
+        } else {
+          return '"' + node.value + '"' + (node.ignoreCase ? "i" : "");
+        }
+      },
+      "format$class": function(node, error) {
+        return (
+          "["
+          + (node.inverted ? "^" : "")
+          + node.parts.map(
+            (part) => {
+              if (typeof part === "string") {
+                return _helpers.escape(part);
+              } else {
+                return part.join("-");
               }
-            ).join("")
-            +"]"
-            + (node.ignoreCase ? "i" : "")
-          );
+            }
+          ).join("")
+          +"]"
+          + (node.ignoreCase ? "i" : "")
+        );
+      },
+      "format$any": function(node, error) { return ".";},
+      "format$rule_ref": function(node, error) {
+        return node.name;
+      },
+      "format$template_ref": function(node, error) {
+        return FORMATTERS.format$rule_ref(node);
+      },
+      ...Object.entries(OPS_TO_SEMANTIC_PREDICATE_TYPES).reduce(
+        function (obj, keyval) {
+          const op = keyval[0];
+          obj["format$" + keyval[1]] = function(node, error) {
+            return op + "{" + node.code + "}";
+          };
+          return obj;
         },
-        "format$any": function(node, error) { return ".";},
-        "format$rule_ref": function(node, error) {
-          return node.name;
-        },
-        "format$template_ref": function(node, error) {
-          return FORMATTERS.format$rule_ref(node);
-        },
-        ...Object.entries(OPS_TO_SEMANTIC_PREDICATE_TYPES).reduce(
-          function (obj, keyval) {
-            const op = keyval[0];
-            obj["format$" + keyval[1]] = function(node, error) {
-              return op + "{" + node.code + "}";
-            };
-            return obj;
-          },
-          {}
-        ),
-        "format$group": function(node, error) {
-          return "(" + format(node.expression, error) + ")";
-        }
+        {}
+      ),
+      "format$group": function(node, error) {
+        return "(" + format(node.expression, error) + ")";
+      }
 
-    };
+  };
 }}
 
 {
-  const TEMPLATE_RULES = {};
-  const TEMPLATE_RULE_REFERENCES = [];
+  const TEMPLATES = {};
+  const TEMPLATE_REFERENCES = [];
+  const RULES = [];
 }
 // ---- Syntactic Grammar -----
 
 FormattedGrammar
     = grammar:Grammar {
-        console.log(JSON.stringify(grammar, null, 2));
-        //_helpers.computeTemplateExpansions(TEMPLATE_RULES, TEMPLATE_RULE_REFERENCES, error);
+        _helpers.computeTemplateExpansions(TEMPLATES, TEMPLATE_RULE_REFERENCES, error);
+        const resolved_grammar = _helpers.resolveTeeVariables(grammar, error);
         console.log(format(grammar, error));
         return "";
     }
 
 Grammar
-  = __ topLevelInitializer:(@TopLevelInitializer __)? initializer:(@Initializer __)? rules:(@Rule __)+ {
+  = __ topLevelInitializer:(@TopLevelInitializer __)? initializer:(@Initializer __)? definitions:(@Definition __)+ {
       return {
         type: "grammar",
         topLevelInitializer,
         initializer,
-        rules,
+        definitions,
         location: location()
       };
     }
@@ -311,16 +326,17 @@ Initializer
       };
     }
 
-Rule
-  = TemplateRule
-  / SimpleRule
+Definition
+  = Template
+  / Rule
 
-SimpleRule
-  = name:IdentifierName __
+Rule
+  = name:IdentifierName !"<" __
     displayName:(@StringLiteral __)?
     "=" __
     expression:Expression EOS
     {
+      RULES.push(name[0]);
       return {
         type: "rule",
         name: name[0],
@@ -337,18 +353,18 @@ SimpleRule
       };
     }
 
-TemplateRule
-  = name:IdentifierName "<" variables:RuleVariables ">" __
+Template
+  = name:IdentifierName "<" variables:TemplateVariables ">" __
     displayName:(@StringLiteral __)?
     "=" __
     expression:Expression EOS
     {
-      if (TEMPLATE_RULES.hasOwnProperty(name[0])) {
-        const loc = TEMPLATE_RULES[name[0]].location;
-        error(`Template "${name[0]}" is already defined at line ${loc.line}, column ${loc.column}`);
+      if (TEMPLATES.hasOwnProperty(name[0])) {
+        const loc PLATES[name[0]].location;
+        error(`Template "${n]}" is already defined at line ${loc.line}, column ${loc.column}`);
       }
-      TEMPLATE_RULES[name[0]] = {
-        location:location(),
+      TEMPLATES[name[0]] = {
+        locatication(),
         name: name[0],
         variables: variables[0],
         variablesLocation: variables[1],
@@ -496,12 +512,12 @@ PrimaryExpression
     }
 
 RuleReferenceExpression
-  = name:IdentifierName !(__ (StringLiteral __)? "=") {
+  = name:IdentifierName !"<" !(__ (StringLiteral __)? "=") {
       return { type: "rule_ref", name: name[0], location: location() };
     }
   
 TemplateReferenceExpression
-  = name:IdentifierName "<" variables:RuleVariables ">" !(__ (StringLiteral __)? "=") {
+  = name:IdentifierName "<" variables:TemplateVariables ">" !(__ (StringLiteral __)? "=") {
       const obj = {
         type: "template_ref",
         name: name[0],
@@ -513,16 +529,15 @@ TemplateReferenceExpression
       return obj;
     }
 
-RuleVariables
-  = head:RuleVariable tail:(_ "," _ @RuleVariable)*
+TemplateVariables
+  = head:TemplateVariable tail:(_ "," _ @TemplateVariable)*
   {
     return [[head].concat(tail), location()];
   }
 
-RuleVariable "template variable"
+TemplateVariable "template variable"
   = name:IdentifierName !(__ (StringLiteral __)? "=")
   {
-    console.log(`!!! Parsed RuleVariable ${name[0]} !!!`);
     return name[0];
   }
 

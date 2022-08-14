@@ -6,11 +6,11 @@ all: $(PARSERS)
 
 grammars: $(GRAMMARS)
 
-crp_utils/processed_grammars/%.pegjs: crp_utils/grammars/%.pegjs crp_utils/preprocessor/metagrammar.pegjs
-	peggy --trace crp_utils/preprocessor/metagrammar.pegjs -T "$<" > "$@.temp"
+crp_utils/processed_grammars/%.pegjs: crp_utils/grammars/%.pegjs crp_utils/preprocessor/metagrammar.pegjs Makefile
+	peggy crp_utils/preprocessor/metagrammar.pegjs -T "$<" > "$@.temp"
 	head -n -1 "$@.temp" > "$@"
 	rm "$@.temp"
 
 
-crp_utils/parsers/%.js: crp_utils/processed_grammars/%.pegjs
+crp_utils/parsers/%.js: crp_utils/processed_grammars/%.pegjs Makefile
 	peggy -o $@ $< --format globals -e "$*_parser"
