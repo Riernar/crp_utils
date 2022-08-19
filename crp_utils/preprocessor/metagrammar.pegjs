@@ -90,208 +90,617 @@
     "with"
   ];
 
-  // Helper function
-  const _helpers = {
-    // from https://www.30secondsofcode.org/js/s/indent-string
-    "indent": function(str, count=2, indent = " ") {
-      return str.replace(/^/gm, indent.repeat(count));
-    },
-    "escape": function(char) {
-      const echar = JSON.stringify(char).slice(1,-1);
-      if ("\\\"'[]{}".includes(echar.charAt(0))) {
-        return "\\" + echar;
-      } else {
-        return echar;
-      }
-    },
-    "findArray": function(storage, target) {
-      var i, j, current;
-      for (i=0; i < storage.length; ++i) {
-        if (storage[i].length == target.length) {
-          current = storage[i];
-          for (j=0; j < target.length && target[j] === current[j]; ++j);
-          if (j === target.length) { return i;}
-        }
-      }
-      return -1;
-    },
-    "computeTemplateExpansions": function(templates, references, error) {
-      references.forEach(reference => {
-        if (!templates.hasOwnProperty(reference.name)) {
-          const names = Object.keys(templates).join(", ");
-          error(`Template "${reference.name}" is undefined (valid names: ${names}).`, reference.location);
-        }
-        const template = templates[reference.name];
-        if (template.variables.length !== reference.variables.length) {
-          error(`Template ${template.name} expects ${template.variables.length}, found ${reference.variables.length} variables`, reference.variablesLocation);
-        }
-        if (_helpers.findArray(template.expansions, reference.variables) < 0) {
-          template.expansions.push(reference.variables);
-        }
+  // HELPERS
+  // I. String helpers
+  function _escapeChar(char) {
+    const echar = JSON.stringify(char).slice(1,-1);
+    if ("\\\"'[]{}".includes(echar.charAt(0))) {
+      return "\\" + echar;
+    } else {
+      return echar;
+    }
+  }
 
-      });
-    },
-    "resolve": function(node, error, context={}) {
-      const name = "resolve$" + node.type;
-      const resolver = (name in _helpers) ? _helpers[name] : null;
-      if (resolver === null) {
-          error("Undefined resolver " + name, node.location);
-      }
-      return resolver(node, error, context);
+  function _splitLines(str) {
+    return str.replace(/\r\n/g, "\n").split("\n");
+  }
 
-    },
-    "resolve$grammar": function(grammar, error, context={}) {
-      grammar.definitions = grammar.definitions.map(def => _helpers.resolve(def, error, context));
-      return grammar;
-    },
+  // from https://www.30secondsofcode.org/js/s/indent-string
+  function _indent(str, count=1, indent = "  ") {
+    return str.replace(/^/gm, indent.repeat(count));
+  }
+
+  function _dedent(string, startLine=1, tabToSpace=2) {
+    // 0. Replace tab by space if specified
+    if ((tabToSpace === undefined) || (tabToSpace === null)) {
+      string = string.replace("\t", " ".repeat(tabToSpace));
+    }
+    
+    // 1. Split string into lines
+    let lines = _splitLines(string.trim());
+
+    // 2. Extract the leading indentation of each non-empty lines
+    let indents = [];
+    let line;
+    for (let i = startLine; i < lines.length; i++) {
+      line = lines[i];
+      if (line.search(/\S/g) > -1) {
+        indents.push(line.match(/ */)[0].length);
+      }
+    }
+
+    // 3. Compute the minimum shared indent, remove it
+    if (indents.length) {
+      let size = Math.min(...indents);
+      if (size) {
+        let pattern = new RegExp(` {${size}}`);
+        lines = lines.map(line => line.replace(pattern, ""));
+      }
+    }
+
+    // 4. Normalize empty lines
+    lines = lines.map(line => line.match(/^\s*$/) ? "" : line);
+
+    return lines.join("\n");
+  }
+
+  function _reindent(str, count=1, indent="  ", startLine=1, tabToSpace=2) {
+    return _indent(
+      _dedent(str, startLine=startLine, tabToSpace=tabToSpace),
+      count=count,
+      indent=indent
+    );
+  }
+
+  function _wrap(str, before="(", after=")") {
+    if (str.includes("\n")) {
+      return [before, _indent(inner), after].join("\n");
+    } else {
+      return before + str + after;
+    }
 
   }
 
-  const format = function (node, error) {
+  // II. Array helpers
+  function _findArray(storage, target) {
+    var i, j, current;
+    for (i=0; i < storage.length; ++i) {
+      if (storage[i].length == target.length) {
+        current = storage[i];
+        for (j=0; j < target.length && target[j] === current[j]; ++j);
+        if (j === target.length) { return i;}
+      }
+    }
+    return -1;
+  }
+
+  // III. Object helpers
+  function _get(obj, prop, default_=undefined) {
+    return obj.hasOwnProperty(prop) ? obj[prop] : default_;
+  }
+
+  function _getMap(map, key, default_=undefined) {
+    return map.has(key) ? map.get(key) : default_;
+  }
+
+  function _mutate(obj, changes) {
+    const result = {...obj};
+    Object.entries(changes).forEach(
+      function ([key, value]) {result[key] = value;}
+    );
+    return result;
+  }
+
+  function _makeMapping(keys, values) {
+    if (!Array.isArray(keys)) {
+      throw `'keys' should be an array, got ${keys}.`;
+    }
+    if (!Array.isArray(values)) {
+      throw `'values' should be an array, got ${values}.`;
+    }
+    if (keys.length !== values.length) {
+      throw `'keys' and 'values' should have the same length, got ${keys.length} and ${values.length}.`
+    }
+    const mapping = new Map();
+    keys.forEach((key, index) => {mapping.set(key, values[index]);});
+    return mapping;
+  }
+
+  // IV. Tree iteration helpers
+  function _makeGetNodes(attributes) {
+    function getNodes(root, array=[]) {
+      // Always add the root node
+      array.push(root);
+      // For each attribute that should be walked
+      return attributes.reduce(
+        (acc, attribute) => {
+          const attr = root[attribute];
+
+          // That specific attribute is empty, skip it
+          if (attr === null) {
+            return acc;
+          } else
+
+          // That attribute is an array, we need to further reduce
+          if (Array.isArray(attr)) {
+            return attr.reduce(
+              (nested_acc, elem) => {
+                _getNodes(elem, nested_acc);
+                return nested_acc;
+              },
+              acc
+            );
+          }
+
+          // Standard sub-node, call the _getNode function and return the acc
+          else {
+            return _getNodes(attr, acc);
+          }
+        },
+        // Keep the previously-added nodes
+        array
+      );
+    }
+    return getNodes;
+  }
+
+  const _TYPES_TO_CHILDREN = [
+    ["grammar", ["topLevelInitialize", "initializer", "definitions"]],
+    ["top_level_initializer", []],
+    ["initializer", []],
+    ["named", ["expression"]],
+    ["rule", ["expression"]],
+    ["template", ["parameters", "expression"]],
+    ["parameter", []],
+    ["choice", ["alternatives"]],
+    ["action", ["expression"]],
+    ["sequence", ["elements"]],
+    ["labeled", ["expression"]],
+    ...Object.values(OPS_TO_PREFIXED_TYPES).map(type => [type, ["expression"]]),
+    ...Object.values(OPS_TO_SUFFIXED_TYPES).map(type => [type, ["expression"]]),
+    ["group", ["expression"]],
+    ["specialization", ["args"]],
+    ["rule_ref", []],
+    ...Object.values(OPS_TO_SEMANTIC_PREDICATE_TYPES).map(type => [type, []]),
+    ["literal", []],
+    ["class", []],
+    ["any", []],
+  ];
+
+  const _GET_NODES = _TYPES_TO_CHILDREN.reduce(
+    (obj, [type, attributes]) => {
+      obj[`getNodes$${type}`] = _makeGetNodes(attributes);
+      return obj;
+    },
+    {}
+  );
+
+  function _getNodes(root, array=[]) {
+    const name = "getNodes$" + root.type;
+    const getter = (name in _GET_NODES) ? _GET_NODES[name] : null;
+    if (getter === null) {
+        error("Undefined getNodes:  " + name, root.location);
+    }
+    return getter(root, array);
+  }
+
+  // V. Template helpers
+  function _joinArguments(args) {
+    return "_$$" + args.join("$") + "$$_";
+  }
+
+  function _makeSpecializationName(templateName, args) {
+    return templateName + _joinArguments(args);
+  }
+
+  function _resolveArguments(specializationNode, referenceMapping) {
+    if (referenceMapping === undefined) {
+      referenceMapping = new Map();
+    }
+    const values = [];
+    for (let arg of specializationNode.args) {
+      if (arg.type === "rule_ref") {
+        values.push(_getMap(referenceMapping, arg.name, arg.name));
+      } else if (arg.type === "specialization") {
+        values.push(_makeSpecializationName(arg.name, _resolveArguments(arg, referenceMapping)));
+      } else {
+        throw `Unhandled template argument type "${arg.type}".`
+      }
+    }
+    return values;
+  }
+
+  function _maxSelfRefError(error, currentTemplate, currentArgs, path, maxSelfRef) {
+    // TODO
+    error("Maximum self-reference depth exceeded (todo: details)");
+  }
+
+  // Main post-processing functions
+
+  // I. Template processing
+
+  function checkTemplateParameters(error, definitions) {
+    // console.log("Checking template params...");
+    // Check that the parameter names of the template does not conflict with definitions
+    Array.from(definitions.values())
+    .filter(def => def.type === "template")
+    .forEach(template => {
+      template.parameters.forEach(param => {
+        if (definitions.has(param.name)) {
+          const loc = definitions.get(param.name).location;
+          error(
+            `Parameter "${param.name}" shadows definition of the same name `
+            + `at line ${loc.start.line}, column ${loc.start.column}.`,
+            param.location
+          );
+        }
+      });
+    });
+    // console.log("done");
+  }
+
+  function checkTemplateSpecializationArgs(error, definitions) {
+    // Check that all TemplateExpansions have the right number of arguments,
+    // and valid template names
+    // console.log("Checking specialization args...");
+    Array.from(definitions.values())
+    .forEach(def => {
+      _getNodes(def)
+      .filter(node => node.type === "specialization")
+      .forEach(specialization => {
+        const referred = definitions.get(specialization.name);
+        if (referred === undefined) {
+          error(`Undefined template "${specialization.name}".`, specialization.nameLocation);
+        }
+        if (specialization.args.length !== referred.parameters.length) {
+          error(
+            `Template "${referred.name}" has ${referred.parameters.length} parameters, `
+            + `got ${specialization.args.length} arguments.`,
+            specialization.argsLocation
+          );
+        }
+      });
+    });
+    // console.log("done");
+  }
+
+  function checkRuleReferences(error, definitions) {
+    // Check that rule references are either valid rule names or parameter names
+    // console.log("Checking rule references...");
+    let parameterNames;
+    Array.from(definitions.values())
+    .forEach(def => {
+      parameterNames = (def.type === "template") ? def.parameters.map(param => param.name) : [];
+      _getNodes(def)
+      .filter(node => node.type === "rule_ref")
+      .forEach(reference => {
+        if (!(definitions.has(reference.name) || parameterNames.includes(reference.name))) {
+          error(
+            `"${reference.name}" is not a definition`
+            + (parameterNames.length ? " or a template parameter" : "")
+            + `. ${parameterNames}`,
+            reference.location
+          );
+        }
+      });
+    });
+    // console.log("done");
+  }
+
+  function makeRegisterSpecializationFunctions(error, definitions, funcStorage) {
+    // console.log("Making registerSpecialization() functions...");
+    if (funcStorage === undefined) {
+      funcStorage = new Map();
+    }
+    Array.from(definitions.values())
+    .filter(def => def.type === "template")
+    .forEach(template => {
+      // Constants used in the function, make them once
+      const parameterNames = template.parameters.map(param => param.name);
+      const nestedSpecialization = _getNodes(template).filter(node => node.type === "specialization");
+
+      function registerSpecialization(error, args, path=[], maxSelfRef=0) {
+        // 1. Check that we haven't exceeded the self-reference depth
+        template.selfReferenceLock = template.selfReferenceLock || [];
+        if (template.selfReferenceLock.length > maxSelfRef) {
+          _maxSelfRefError(error, template, args, path, maxSelfRef);
+        }
+
+        // 2. If circular dependency with the same arguments, we don't need to do anything
+        if (_findArray(template.selfReferenceLock, args) === -1) {
+          // Add the current template & args to the self reference and the path
+          template.selfReferenceLock.push([args]);
+          path.push([template, args]);
+
+          // 3. Call the registerSpecialization method of template specialized in this template
+          const params = _makeMapping(parameterNames, args);
+          nestedSpecialization.forEach(specialization => {
+            const nestedArgs = _resolveArguments(specialization, params);
+            funcStorage.get(specialization.name)(error, nestedArgs, path, maxSelfRef);
+          });
+
+          // 4. Add the arguments to the list of specialization
+          template.specializations.push(args);
+
+          // 5. Remove the current template & args to the lock & path
+          template.selfReferenceLock.pop();
+          path.pop();
+
+          // 6. Return the resolved name of the specialization
+          return _makeSpecializationName(template.name, args);
+        }
+      }
+      // END function definition
+
+      // Register the function
+      funcStorage.set(template.name, registerSpecialization);
+    });
+    // console.log("done");
+    return funcStorage;
+  }
+
+  function registerAllSpecializations(error, definitions, funcStorage) {
+    // console.log("Registering all specializations");
+    Array.from(definitions.values())
+    .filter(def => def.type === "rule")
+    .forEach(rule => {
+      _getNodes(rule)
+      .filter(node => node.type === "specialization")
+      .forEach(specialization => {
+        const args = _resolveArguments(specialization);
+        const template = definitions.get(specialization.name);
+        const registerFunc = funcStorage.get(template.name);
+        // Save the registered name for when we format
+        specialization.registeredName = registerFunc(error, args);
+      });
+    });
+    // console.log("done");
+  }
+
+  function _buildSpecialization(error, template, args) {
+    // console.log(`Building ${_makeSpecializationName(template.name, args)}`);
+    const copy = JSON.parse(JSON.stringify(template));
+    // Modify the copied tree in-place so that it is now a rule
+    const params = _makeMapping(template.parameters.map(param => param.name), args);
+    _getNodes(copy).forEach(node => {
+      // Change the root node to a rule definition
+      if (node.type === "template") {
+        node.type = "rule";
+        node.templateName = node.name;
+        node.name = _makeSpecializationName(node.templateName, args);
+      }
+
+      // Change specialization to rule references
+      if (node.type === "specialization") {
+        node.name = _makeSpecializationName(node.name, _resolveArguments(node, params));
+        node.type = "rule_ref";
+      }
+
+      // Remplace parameters
+      if (node.type === "rule_ref" && params.has(node.name)) {
+        node.name = params.get(node.name);
+      }
+    });
+    // console.log("done");
+    return copy;
+  }
+
+  function buildAllSpecializations(error, definitions) {
+    // console.log("Building all specializations...");
+    const specializations = [];
+    Array.from(definitions.values())
+    .filter(def => def.type === "template")
+    .forEach(template => {
+      template.specializations.forEach(args => {
+        specializations.push(_buildSpecialization(error, template, args));
+      });
+    });
+    // console.log("done");
+    return specializations;
+  }
+
+  function processTemplates(error, definitions) {
+    checkTemplateParameters(error, definitions);
+    checkTemplateSpecializationArgs(error, definitions);
+    checkRuleReferences(error, definitions);
+    const registerFunctions = makeRegisterSpecializationFunctions(error, definitions);
+    registerAllSpecializations(error, definitions, registerFunctions);
+    return buildAllSpecializations(error, definitions);
+  }
+
+  // II. Rule re-ordering
+
+  function reorderRules(error, rules) {
+    // TODO
+    return rules;
+  }
+
+  // III. Rule formatting
+
+  const _FORMATTERS = {
+    "format$grammar": function(node, error, ctx={}) {
+      const parts = [];
+      if (node.topLevelInitializer !== null) {
+        parts.push(format(node.topLevelInitializer, error, ctx));
+        parts.push("\n");
+      }
+      if (node.initializer !== null) {
+        parts.push(format(node.initializer, error, ctx));
+        parts.push("\n");
+      }
+      parts.push(...node.definitions.map((rule) => format(rule, error, ctx)));
+      return parts.join("\n\n");
+    },
+    "format$top_level_initializer": function(node, error, ctx={}) {
+
+      return "{{" + _reindent(node.code) + "}}";
+    },
+    "format$initializer": function(node, error, ctx={}) {
+      return "{" + _reindent(node.code) + "}";
+    },
+    "format$rule": function(node, error, ctx={}) {
+      const parts = [node.name];
+      let expression = node.expression;
+      if (node.expression.type == "named") {
+        parts.push(" \"");
+        parts.push(node.expression.name);
+        parts.push("\"");
+        expression = node.expression.expression;
+      }
+      parts.push("\n  = ");
+      parts.push(
+        _indent(format(expression, error, ctx=ctx))
+        .slice(2)
+      );
+      return parts.join("");
+    },
+    "format$choice": function(node, error, ctx={}) {
+      const alternatives = node.alternatives.map(rule => format(rule, error, ctx));
+      if (
+        // small enough
+        (alternatives.reduce((acc, str) => acc + str.length, 0) + 3 * alternatives.length < 70)
+        // No newline
+        && (!alternatives.some(str => str.includes("\n")))
+      ) {
+        // Then format the alternative inline
+        return alternatives.join(" / ");
+      } else {
+        return alternatives
+        .map(alt => _indent(alt))
+        .map(str => str.slice(2))
+        .join("\n/ ");
+      }
+    },
+    "format$action": function(node, error, ctx={}) {
+      return [
+        format(node.expression, error, ctx),
+        "{",
+        _reindent(node.code),
+        "}"
+      ].join("\n");
+    },
+    "format$sequence": function(node, error, ctx={}) {
+      return node.elements.map((elem) => format(elem, error, ctx={})).join(" ");
+    },
+    "format$labeled": function(node, error, ctx={}) {
+      return [
+        node.pick ? "@" : "",
+        node.label ? node.label + ":" : "",
+        format(node.expression, error, ctx)
+      ].join("");
+    },
+    ...Object.entries(OPS_TO_PREFIXED_TYPES).reduce(
+      function (obj, [op, type]) {
+        obj["format$" + type] = function(node, error, ctx={}) {
+          return op + format(node.expression, error, ctx=ctx);
+        };
+        return obj;
+      },
+      {}
+    ),
+    ...Object.entries(OPS_TO_SUFFIXED_TYPES).reduce(
+      function (obj, [op, type]) {
+        obj["format$" + type] = function(node, error, ctx={}) {
+          return format(node.expression, error, ctx=ctx) + op;
+        };
+        return obj;
+      },
+      {}
+    ),
+    "format$literal": function(node, error, ctx={}) {
+      if (node.value.includes('"')) {
+        return "'" + node.value + "'" + (node.ignoreCase ? "i" : "");
+      } else {
+        return '"' + node.value + '"' + (node.ignoreCase ? "i" : "");
+      }
+    },
+    "format$class": function(node, error, ctx={}) {
+      return [
+        "[",
+        node.inverted ? "^" : "",
+        ...node.parts.map(
+          part => ((typeof part === "string") ? _escapeChar(part) : part.join("-"))
+        ),
+        "]",
+        node.ignoreCase ? "i" : ""
+      ].join("");
+    },
+    "format$any": function(node, error, ctx={}) {
+      return ".";
+    },
+    "format$specialization": function(node, error, ctx={}) {
+      return node.registeredName;
+    },
+    "format$rule_ref": function(node, error, ctx={}) {
+      return node.name;
+    },
+    ...Object.entries(OPS_TO_SEMANTIC_PREDICATE_TYPES).reduce(
+      function (obj, [op, type]) {
+        obj["format$" + type] = function(node, error, ctx={}) {
+          if (node.code.includes("\n")) {
+            return [op + "{", _reindent(node.code), "}"].join("\n");
+          } else {
+            return op + "{" + node.code + "}";
+          }
+        };
+        return obj;
+      },
+      {}
+    ),
+    "format$group": function(node, error, ctx={}) {
+      const inner = format(node.expression, error, ctx=ctx);
+      if (inner.includes("\n")) {
+        return ["(", _indent(inner), ")"].join("\n");
+      } else {
+        return `(${inner})`;
+      }
+    }
+  };
+
+  const format = function (node, error, ctx={}) {
       const name = "format$" + node.type;
-      const formatter = (name in FORMATTERS) ? FORMATTERS[name] : null;
+      const formatter = (name in _FORMATTERS) ? _FORMATTERS[name] : null;
       if (formatter === null) {
           error("Undefined formatter " + name, node.location);
       }
-      return formatter(node, error);
+      return formatter(node, error, ctx);
   }
-
-  const FORMATTERS = {
-      "format$grammar": function(node, error) {
-        const parts = [];
-        if (node.topLevelInitializer !== null) {
-          parts.push(format(node.topLevelInitializer, error));
-          parts.push("\n");
-        }
-        if (node.initializer !== null) {
-          parts.push(format(node.initializer, error));
-          parts.push("\n");
-        }
-        parts.push(...node.definitions.map((rule) => format(rule, error)));
-        return parts.join("\n\n");
-      },
-      "format$top_level_initializer": function(node, error) {
-        return "{{" + node.code + "}}";
-      },
-      "format$initializer": function(node, error) {
-        return "{" + node.code + "}";
-      },
-      "format$rule": function(node, error) {
-        const parts = [node.name];
-        let expression = node.expression;
-        if (node.expression.type == "named") {
-          parts.push(" \"");
-          parts.push(node.expression.name);
-          parts.push("\"");
-          expression = node.expression.expression;
-        }
-        parts.push("\n  = ");
-        parts.push(_helpers.indent(format(expression, error)).slice(2));
-        return parts.join("");
-      },
-      "format$template": function(node, error) {
-        return FORMATTERS.format$rule(node, error);
-      },
-      "format$choice": function(node, error) {
-        return node.alternatives.map((rule) => format(rule, error)).join("\n/ ");
-      },
-      "format$action": function(node, error) {
-        return format(node.expression, error) + " {" + node.code + "}";
-      },
-      "format$sequence": function(node, error) {
-        return node.elements.map((elem) => format(elem, error)).join(" ");
-      },
-      "format$labeled": function(node, error) {
-        const parts = [];
-        if (node.pick) {
-          parts.push("@");
-        }
-        if (node.label !== null) {
-          parts.push(node.label + ":");
-        }
-        parts.push(format(node.expression, error));
-        return parts.join("");
-      },
-      ...Object.entries(OPS_TO_PREFIXED_TYPES).reduce(
-        function (obj, keyval) {
-          const op = keyval[0];
-          obj["format$" + keyval[1]] = function(node, error) {
-            return op + format(node.expression, error);
-          };
-          return obj;
-        },
-        {}
-      ),
-      ...Object.entries(OPS_TO_SUFFIXED_TYPES).reduce(
-        function (obj, keyval) {
-          const op = keyval[0];
-          obj["format$" + keyval[1]] = function(node, error) {
-            return format(node.expression, error) + op;
-          };
-          return obj;
-        },
-        {}
-      ),
-      "format$literal": function(node, error) {
-        if (node.value.includes('"')) {
-          return "'" + node.value + "'" + (node.ignoreCase ? "i" : "");
-        } else {
-          return '"' + node.value + '"' + (node.ignoreCase ? "i" : "");
-        }
-      },
-      "format$class": function(node, error) {
-        return (
-          "["
-          + (node.inverted ? "^" : "")
-          + node.parts.map(
-            (part) => {
-              if (typeof part === "string") {
-                return _helpers.escape(part);
-              } else {
-                return part.join("-");
-              }
-            }
-          ).join("")
-          +"]"
-          + (node.ignoreCase ? "i" : "")
-        );
-      },
-      "format$any": function(node, error) { return ".";},
-      "format$rule_ref": function(node, error) {
-        return node.name;
-      },
-      "format$template_ref": function(node, error) {
-        return FORMATTERS.format$rule_ref(node);
-      },
-      ...Object.entries(OPS_TO_SEMANTIC_PREDICATE_TYPES).reduce(
-        function (obj, keyval) {
-          const op = keyval[0];
-          obj["format$" + keyval[1]] = function(node, error) {
-            return op + "{" + node.code + "}";
-          };
-          return obj;
-        },
-        {}
-      ),
-      "format$group": function(node, error) {
-        return "(" + format(node.expression, error) + ")";
-      }
-
-  };
 }}
 
 {
-  const TEMPLATES = {};
-  const TEMPLATE_REFERENCES = [];
-  const RULES = [];
+  const DEFINITIONS = new Map();
 }
 // ---- Syntactic Grammar -----
 
 FormattedGrammar
     = grammar:Grammar {
-        _helpers.computeTemplateExpansions(TEMPLATES, TEMPLATE_RULE_REFERENCES, error);
-        const resolved_grammar = _helpers.resolveTeeVariables(grammar, error);
-        console.log(format(grammar, error));
+        // console.log(JSON.stringify(grammar, null, 2));
+        const specializations = processTemplates(error, DEFINITIONS);
+        // Merge rules and specializations in order
+        const rules = [];
+        for (const def of DEFINITIONS.values()) {
+          if (def.type === "rule") {
+            rules.push(def);
+          } else if (def.type === "template") {
+            rules.push(...specializations.filter(spe => spe.templateName === def.name));
+          }
+        }
+        // console.log(rules);
+
+        // Make a re-ordered grammar
+        const orderedGrammar = {
+          type: "grammar",
+          topLevelInitializer: grammar.topLevelInitializer,
+          initializer: grammar.initializer,
+          definitions: reorderRules(error, rules),
+          location: grammar.location,
+        };
+
+        // Convert the grammar to a formatted string
+        const formattedGrammar = format(orderedGrammar, error);
+
+        // Print the grammar, return "" for use with "peggy -T" command
+        console.log(formattedGrammar);
         return "";
     }
 
@@ -302,7 +711,7 @@ Grammar
         topLevelInitializer,
         initializer,
         definitions,
-        location: location()
+        location: location(),
       };
     }
 
@@ -312,7 +721,7 @@ TopLevelInitializer
         type: "top_level_initializer",
         code: code[0],
         codeLocation: code[1],
-        location: location()
+        location: location(),
       };
     }
 
@@ -322,13 +731,19 @@ Initializer
         type: "initializer",
         code: code[0],
         codeLocation: code[1],
-        location: location()
+        location: location(),
       };
     }
 
 Definition
-  = Template
-  / Rule
+  = def:(Template / Rule) {
+    if (DEFINITIONS.has(def.name)) {
+      const loc = DEFINITIONS.get(def.name).location;
+      error(`${def.name} is already defined at line ${loc.start.line}, column ${loc.start.column}.`);
+    }
+    DEFINITIONS.set(def.name, def);
+    return def;
+  }
 
 Rule
   = name:IdentifierName !"<" __
@@ -336,7 +751,6 @@ Rule
     "=" __
     expression:Expression EOS
     {
-      RULES.push(name[0]);
       return {
         type: "rule",
         name: name[0],
@@ -346,47 +760,53 @@ Rule
               type: "named",
               name: displayName,
               expression,
-              location: location()
+              location: location(),
             }
           : expression,
-        location: location()
+        location: location(),
       };
     }
 
 Template
-  = name:IdentifierName "<" variables:TemplateVariables ">" __
+  = name:IdentifierName "<" parameters:TemplateParams ">" __
     displayName:(@StringLiteral __)?
     "=" __
     expression:Expression EOS
     {
-      if (TEMPLATES.hasOwnProperty(name[0])) {
-        const loc PLATES[name[0]].location;
-        error(`Template "${n]}" is already defined at line ${loc.line}, column ${loc.column}`);
-      }
-      TEMPLATES[name[0]] = {
-        locatication(),
-        name: name[0],
-        variables: variables[0],
-        variablesLocation: variables[1],
-        expansions: [],
-      };
-      return {
+      const template = {
         type: "template",
         name: name[0],
         nameLocation: name[1],
-        variables: variables[0],
-        variablesLocation: variables[1],
+        parameters,
+        specializations: [],
         expression: displayName !== null
           ? {
               type: "named",
               name: displayName,
               expression,
-              location: location()
+              location: location(),
             }
           : expression,
-        location: location()
+        location: location(),
       };
+      return template;
     }
+
+TemplateParams
+  = head:TemplateParameter tail:(__ "," __ @TemplateParameter)*
+  {
+    return [head].concat(tail);
+  }
+
+TemplateParameter "template parameter"
+  = name:IdentifierName !(__ (StringLiteral __)? "=")
+  {
+    return {
+      type:"parameter",
+      name:name[0],
+      location:location(),
+    };
+  }
 
 Expression
   = ChoiceExpression
@@ -397,7 +817,7 @@ ChoiceExpression
         ? {
             type: "choice",
             alternatives: [head].concat(tail),
-            location: location()
+            location: location(),
           }
         : head;
     }
@@ -410,7 +830,7 @@ ActionExpression
             expression,
             code: code[0],
             codeLocation: code[1],
-            location: location()
+            location: location(),
           }
         : expression;
     }
@@ -421,7 +841,7 @@ SequenceExpression
         ? {
             type: "sequence",
             elements: [head].concat(tail),
-            location: location()
+            location: location(),
           }
         : head;
     }
@@ -438,7 +858,7 @@ LabeledExpression
         labelLocation: label !== null ? label[1] : pluck,
         pick: true,
         expression,
-        location: location()
+        location: location(),
       };
     }
   / label:LabelColon __ expression:PrefixedExpression {
@@ -469,7 +889,7 @@ PrefixedExpression
       return {
         type: OPS_TO_PREFIXED_TYPES[operator],
         expression,
-        location: location()
+        location: location(),
       };
     }
   / SuffixedExpression
@@ -484,7 +904,7 @@ SuffixedExpression
       return {
         type: OPS_TO_SUFFIXED_TYPES[operator],
         expression,
-        location: location()
+        location: location(),
       };
     }
   / PrimaryExpression
@@ -498,7 +918,7 @@ PrimaryExpression
   = LiteralMatcher
   / CharacterClassMatcher
   / AnyMatcher
-  / TemplateReferenceExpression
+  / TemplateSpecializationExpression
   / RuleReferenceExpression
   / SemanticPredicateExpression
   / "(" __ expression:Expression __ ")" {
@@ -506,41 +926,50 @@ PrimaryExpression
       // don't need to put it around nodes that can't contain any labels or
       // nodes that already isolate label scope themselves. This leaves us with
       // "labeled" and "sequence".
-      return expression.type === "labeled" || expression.type === "sequence"
-          ? { type: "group", expression, location: location() }
-          : expression;
+      // However, this metagrammar will re-print the parsed grammar, and removing
+      // parens might change the meaning of the grammar (TODO: verify)
+      // For now, always keep a group when finding one
+      return (
+          //expression.type === "labeled" || expression.type === "sequence"
+          //?
+          {
+            type: "group",
+            expression,
+            location: location(),
+          }
+          //:
+          //expression
+      );
     }
+
+TemplateSpecializationExpression
+  = name:IdentifierName "<" args:SpecializationArgs ">" !(__ (StringLiteral __)? "=") {
+      return {
+        type: "specialization",
+        name: name[0],
+        nameLocation: name[1],
+        args: args[0],
+        argsLocation: args[1],
+        location: location(),
+      };
+    }
+  
+SpecializationArgs
+  = head:SpecializationArgument tail:(__ "," __ @SpecializationArgument)* {
+    return [[head].concat(tail), location() ];
+  }
+SpecializationArgument
+  = RuleReferenceExpression
+  / TemplateSpecializationExpression
 
 RuleReferenceExpression
   = name:IdentifierName !"<" !(__ (StringLiteral __)? "=") {
-      return { type: "rule_ref", name: name[0], location: location() };
-    }
-  
-TemplateReferenceExpression
-  = name:IdentifierName "<" variables:TemplateVariables ">" !(__ (StringLiteral __)? "=") {
-      const obj = {
-        type: "template_ref",
+      return {
+        type: "rule_ref",
         name: name[0],
-        variables: variables[0],
-        variablesLocation: variables[1],
-        location: location()
+        location: location(),
       };
-      TEMPLATE_RULE_REFERENCES.push(obj);
-      return obj;
     }
-
-TemplateVariables
-  = head:TemplateVariable tail:(_ "," _ @TemplateVariable)*
-  {
-    return [[head].concat(tail), location()];
-  }
-
-TemplateVariable "template variable"
-  = name:IdentifierName !(__ (StringLiteral __)? "=")
-  {
-    return name[0];
-  }
-
 
 SemanticPredicateExpression
   = operator:SemanticPredicateOperator __ code:CodeBlock {
@@ -548,7 +977,7 @@ SemanticPredicateExpression
         type: OPS_TO_SEMANTIC_PREDICATE_TYPES[operator],
         code: code[0],
         codeLocation: code[1],
-        location: location()
+        location: location(),
       };
     }
 
@@ -636,7 +1065,7 @@ LiteralMatcher "literal"
         type: "literal",
         value,
         ignoreCase: ignoreCase !== null,
-        location: location()
+        location: location(),
       };
     }
 
@@ -666,7 +1095,8 @@ CharacterClassMatcher "character class"
         parts: parts.filter(part => part !== ""),
         inverted: inverted !== null,
         ignoreCase: ignoreCase !== null,
-        location: location()
+        location: location(),
+        getNodes(array=[]) { array.push(this); return array; },
       };
     }
 

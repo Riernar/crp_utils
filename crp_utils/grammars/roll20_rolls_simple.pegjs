@@ -58,7 +58,7 @@
 // The most-deeply nested rules have precedence other the less-nested
 // rules, e.g. below, multiplication has priority over addition,
 //
-// Lesf-associativity is handled by the eager consuming of all operators
+// Left-associativity is handled by the eager consuming of all operators
 // of the same priority, and then using a left-reduce on the resulting array
 
 
@@ -86,11 +86,10 @@ Exponentiation<T>
     }
     / T
 
-// 1. Arithemtic operators
+// // 1. Arithemtic operators
 
 Expression
     = Addition<Term>
-
 
 
 // 2. Inline Labels
@@ -112,10 +111,10 @@ Label "inline label"
         return label;
     }
 
-// 3. Terms, i.e. dice or simpler things (primaries)
-//    Basic elements that may be part of arithemtics operations (labelled or not)
-//    Dice come up first, because they can consumed parenthesized expression so need to be
-//    before
+// // 3. Terms, i.e. dice or simpler things (primaries)
+// //    Basic elements that may be part of arithemtics operations (labelled or not)
+// //    Dice come up first, because they can consumed parenthesized expression so need to be
+// //    before
 
 UnlabelledTerm
     = DiceRoll
@@ -124,222 +123,222 @@ UnlabelledTerm
     / Integer
     / Number
 
-// 3.1 Dice
+// // 3.1 Dice
 
 DiceRoll
     = .
 
 
-// 3.1.1 base dice
+// // 3.1.1 base dice
 
-Dice "dice"
-    = FateDice
-    / NumericDice
+// Dice "dice"
+//     = FateDice
+//     / NumericDice
 
-FateDice
-    = amount:DieNumber "dF" {
-        return {
-            type: "dice",
-            amount: amount,
-            sides: "F"
-        };
-    }
+// FateDice
+//     = amount:DieNumber "dF" {
+//         return {
+//             type: "dice",
+//             amount: amount,
+//             sides: "F"
+//         };
+//     }
 
-NumericDice
-    = amount:DieNumber "d" sides:DieNumber {
-        return {
-            type: "dice",
-            amount: amount,
-            sides: sides
-        };
-    }
+// NumericDice
+//     = amount:DieNumber "d" sides:DieNumber {
+//         return {
+//             type: "dice",
+//             amount: amount,
+//             sides: sides
+//         };
+//     }
 
-DieNumber
-    = FunctionCall
-    / Parens
-    / Integer
+// DieNumber
+//     = FunctionCall
+//     / Parens
+//     / Integer
 
-// 3.1.2 Modifiers
+// // 3.1.2 Modifiers
 
-DiceModifers
-    // TODO
-    = .
+// DiceModifers
+//     // TODO
+//     = .
 
-// 3.1.2.1 Roll modifiers
-//         Those modifiers change how die are rolled
+// // 3.1.2.1 Roll modifiers
+// //         Those modifiers change how die are rolled
 
-DiceRollModifiers
-    = explode:ExplodingModifier compound:CompoundingModifier penetrating:PenetratingModifier reroll:RerollModifier {
-        return {
-            expoding: exploding,
-            compound: compound,
-            penetrating: penetrating,
-            reroll:reroll
-        };
-    }
+// DiceRollModifiers
+//     = explode:ExplodingModifier compound:CompoundingModifier penetrating:PenetratingModifier reroll:RerollModifier {
+//         return {
+//             expoding: exploding,
+//             compound: compound,
+//             penetrating: penetrating,
+//             reroll:reroll
+//         };
+//     }
 
-ExplodingModifier
-    = "!" cp:ComparePoint? {
-        return makeDiceModifier("exploding", cp);
-    }
+// ExplodingModifier
+//     = "!" cp:ComparePoint? {
+//         return makeDiceModifier("exploding", cp);
+//     }
 
-CompoundingModifier
-    = "!!" cp:ComparePoint? {
-        return makeDiceModifier("compounding", cp);
-    }
+// CompoundingModifier
+//     = "!!" cp:ComparePoint? {
+//         return makeDiceModifier("compounding", cp);
+//     }
 
-PenetratingModifier
-    = "!p" cp:ComparePoint? {
-        return makeDiceModifier("penetrating", cp);
-    }
+// PenetratingModifier
+//     = "!p" cp:ComparePoint? {
+//         return makeDiceModifier("penetrating", cp);
+//     }
 
-RerollModifier
-    = rerolls:SimpleRerollModifier+ {
-        // TODO!!
-    }
+// RerollModifier
+//     = rerolls:SimpleRerollModifier+ {
+//         // TODO!!
+//     }
 
-SimpleRerollModifier
-    = "r" once:"o" ? cp:ComparePoint? {
-        name = once ? "reroll_once" : "reroll";
-        return makeDiceModifier(name, cp);
-    }
+// SimpleRerollModifier
+//     = "r" once:"o" ? cp:ComparePoint? {
+//         name = once ? "reroll_once" : "reroll";
+//         return makeDiceModifier(name, cp);
+//     }
 
-// 3.1.2.2 Dice selection modifiers
-//         Those modifiers change which dice are kept for further computations
+// // 3.1.2.2 Dice selection modifiers
+// //         Those modifiers change which dice are kept for further computations
 
-DiceSelectionModifiers
-    = keep:KeepModifier? drop:DropModifier? {
-        return {keep:keep, drop:drop};
-    }
+// DiceSelectionModifiers
+//     = keep:KeepModifier? drop:DropModifier? {
+//         return {keep:keep, drop:drop};
+//     }
 
-KeepModifier
-    = "k" param:("h" / "l")? amount:Integer {
-        obj = makeDiceModifier("keep");
-        obj.which = KEEP_DROP_WHICH[param ? param : "h"];
-        obj.amount = amount;
-        return obj;
-    }
+// KeepModifier
+//     = "k" param:("h" / "l")? amount:Integer {
+//         obj = makeDiceModifier("keep");
+//         obj.which = KEEP_DROP_WHICH[param ? param : "h"];
+//         obj.amount = amount;
+//         return obj;
+//     }
 
-DropModifier
-    = "d" param:("h" / "l") amount:Integer {
-        obj = makeDiceModifier("drop");
-        bj.which = KEEP_DROP_WHICH[param ? param : "l"];
-        obj.amount = amount;
-        return obj;
-    }
+// DropModifier
+//     = "d" param:("h" / "l") amount:Integer {
+//         obj = makeDiceModifier("drop");
+//         bj.which = KEEP_DROP_WHICH[param ? param : "l"];
+//         obj.amount = amount;
+//         return obj;
+//     }
 
-// 3.1.2.3 Display Modifiers
-//         Those modifiers only change how dices are displayed
-DiceDisplayModifiers
-    = sort:SortModifier? {
-        return {sort: sort};
-    }
+// // 3.1.2.3 Display Modifiers
+// //         Those modifiers only change how dices are displayed
+// DiceDisplayModifiers
+//     = sort:SortModifier? {
+//         return {sort: sort};
+//     }
 
-SortModifier
-    = "s" order:("a" / "d")? {
-        obj = makeDiceModifier("sort");
-        obj.order = SORT_ORDER[order ? order : "a"];
-        return obj;
-    }
+// SortModifier
+//     = "s" order:("a" / "d")? {
+//         obj = makeDiceModifier("sort");
+//         obj.order = SORT_ORDER[order ? order : "a"];
+//         return obj;
+//     }
 
-// 3.1.2.3 Success modifiers
-//         Those modifiers change the die result to a success computation
+// // 3.1.2.3 Success modifiers
+// //         Those modifiers change the die result to a success computation
 
-DiceSuccessModifiers
-    = success:SuccessModifier failure:FailureModifier? {
-        return {
-            success: success,
-            failure: failure
-        };
-    }
+// DiceSuccessModifiers
+//     = success:SuccessModifier failure:FailureModifier? {
+//         return {
+//             success: success,
+//             failure: failure
+//         };
+//     }
 
-SuccessModifier
-    = cp:ComparePoint {
-        return makeDiceModifier("success", cp);
-    }
+// SuccessModifier
+//     = cp:ComparePoint {
+//         return makeDiceModifier("success", cp);
+//     }
 
-FailureModifier
-    = "f" cp:ComparePoint {
-        return makeDiceModifier("failure", cp);
-    }
+// FailureModifier
+//     = "f" cp:ComparePoint {
+//         return makeDiceModifier("failure", cp);
+//     }
 
-// 3.1.2.4 Match Modifier
-//         This modifier change the roll to a match roll
+// // 3.1.2.4 Match Modifier
+// //         This modifier change the roll to a match roll
 
-MatchResultModifier
-    = "m" result:"t"? group_size:Integer? {
-        obj = makeDiceModifier("match_result");
-        obj.change_result = result ? true : false;
-        obj.group_size = group_size ? group_size : 2;
-        return obj;
-    }
-
-
-
-// 3.1.3.3 Modifiers helpers
-
-ComparePoint
-    = operator:("<" / "=" / ">" )? target:Integer {
-        return {
-            type: "compare_point",
-            operator: operator ? operator : "=",
-            target: target
-        }
-    }
+// MatchResultModifier
+//     = "m" result:"t"? group_size:Integer? {
+//         obj = makeDiceModifier("match_result");
+//         obj.change_result = result ? true : false;
+//         obj.group_size = group_size ? group_size : 2;
+//         return obj;
+//     }
 
 
-// 3.2 Function calls
-//     Roll20 only supports a reduced number of function, make it explicit
 
-FunctionCall
-    = name:("floor" / "round" / "ceil" / "abs") "(" ws* expression:Expression ws* ")" {
-        return makeFunctionCall(name, expression);
-    }
+// // 3.1.3.3 Modifiers helpers
 
-// 3.3 Parenthesised expressions
+// ComparePoint
+//     = operator:("<" / "=" / ">" )? target:Integer {
+//         return {
+//             type: "compare_point",
+//             operator: operator ? operator : "=",
+//             target: target
+//         }
+//     }
 
-Parens
-    = "(" ws* expression:Expression ws* ")" {
-        return expression
-    }
 
-// 3.4 Numbers
+// // 3.2 Function calls
+// //     Roll20 only supports a reduced number of function, make it explicit
 
-Integer "integer"
-    = DecimalIntegerLiteral {
-        return parseInt(text());
-    }
+// FunctionCall
+//     = name:("floor" / "round" / "ceil" / "abs") "(" ws* expression:Expression ws* ")" {
+//         return makeFunctionCall(name, expression);
+//     }
 
-Number "number"
-    = DecimalIntegerLiteral "." DecimalDigit* ExponentPart? {
-        return parseFloat(text());
-    }
+// // 3.3 Parenthesised expressions
 
-    / "." DecimalDigit+ ExponentPart? {
-        return parseFloat(text());
-    }
-    / DecimalIntegerLiteral ExponentPart? {
-        return parseFloat(text());
-    }
+// Parens
+//     = "(" ws* expression:Expression ws* ")" {
+//         return expression
+//     }
 
-DecimalIntegerLiteral
-    = "0"
-    / NonZeroDigit DecimalDigit*
+// // 3.4 Numbers
 
-DecimalDigit
-    = [0-9]
+// Integer "integer"
+//     = DecimalIntegerLiteral {
+//         return parseInt(text());
+//     }
 
-NonZeroDigit
-    = [1-9]
+// Number "number"
+//     = DecimalIntegerLiteral "." DecimalDigit* ExponentPart? {
+//         return parseFloat(text());
+//     }
 
-ExponentPart
-    = ExponentIndicator SignedInteger
+//     / "." DecimalDigit+ ExponentPart? {
+//         return parseFloat(text());
+//     }
+//     / DecimalIntegerLiteral ExponentPart? {
+//         return parseFloat(text());
+//     }
 
-ExponentIndicator
-    = "e"i
+// DecimalIntegerLiteral
+//     = "0"
+//     / NonZeroDigit DecimalDigit*
 
-SignedInteger
-    = [+-]? DecimalDigit+
+// DecimalDigit
+//     = [0-9]
 
-ws "whitespace"
-    = [ \t]
+// NonZeroDigit
+//     = [1-9]
+
+// ExponentPart
+//     = ExponentIndicator SignedInteger
+
+// ExponentIndicator
+//     = "e"i
+
+// SignedInteger
+//     = [+-]? DecimalDigit+
+
+// ws "whitespace"
+//     = [ \t]
