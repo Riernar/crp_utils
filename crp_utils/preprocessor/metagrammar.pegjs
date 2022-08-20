@@ -3,13 +3,38 @@
 // Peggy Grammar preprocessor
 // ==========================
 //
-// This grammar is an extension of the peggy grammer, that adds variadic rules.
-// Variadic rules are rules which depends on other rule(s), and can be reused.
+// This grammar is an extension of the peggy grammer that additionnally supports
+// templates like the C++ templates.
 //
-// This grammar acts as a pre-processor for a peggy grammar, producing a new
-// grammar as outputs that no longer contains variadic rules, and is thus
+// The grammar acts as a pre-processor for the extended peggy grammar, producing
+// a new grammar as outputs that no longer contains variadic rules, and is thus
 // valid peggy grammar.
 //
+// Templates are rules with parameters defined in angle brackets, like
+//
+//   Template<Param1, T>
+//     = ...
+//
+// Template are otherwise defined as standard rules, except that the parameters become
+// valid rule reference within the template.
+//
+//
+// Templates or standard rule can then reference a *specialization* of a template by
+// referencing the template name, followed by specialization arguments in angle brackets:
+//
+//    Rule
+//      = Template<OtherRule, YetAnotherRule>
+//
+// This construct causes the preprocessor to add a new rule derived from the template, where
+// all reference to the parameters are replace by references to the specialization arguments.
+//
+// You can nest template, use specialization inside template definitions or inside specialization
+// argument (i.e. Template<Template<Rule>, Rule> is legal) and templates can reference themselves
+// with different arguments up to a certain depth (currently 0).
+//
+// ====================
+// Original description
+// ====================
 //
 // Peggy grammar syntax is designed to be simple, expressive, and similar to
 // JavaScript where possible. This means that many rules, especially in the
@@ -511,8 +536,62 @@
   // II. Rule re-ordering
 
   function reorderRules(error, rules) {
-    // TODO
-    return rules;
+    // 1. Map rule names to their index
+    const indexMap = new Map();
+    rules.forEach((rule, index) => {
+      indexMap.set(rule.name, index);
+    });
+
+    // 2. Map an index to the set of rule depending on it
+    const dependentsMap = new Map();
+    for (let index=0; index < rules.length; index++) {
+      dependentsMap.set(index, new Set());
+    }
+    rules.forEach((rule, dependentIndex) => {
+      _getNodes(rule)
+      .filter(node => node.type === "rule_ref")
+      .forEach(ref => {
+        const dependeeIndex = indexMap.get(ref.name);
+        dependentsMap.get(dependeeIndex).add(dependentIndex);
+      });
+    });
+
+    // 3. Apply Kahn's algorithm to perform a topological sort on the rules
+    //    Break cycles and ties using the original order
+    
+    // 3.1 Keep the first rule at first position, since this is the starting rule
+    const sortedRules = [rules[0]];
+    dependentsMap.delete(0);
+    dependentsMap.forEach(dependents => dependents.delete(0));
+
+    // 3.2 Kahn's algorithm for topological sort
+    let leafs;
+    let ruleIndexToAdd;
+    while (dependentsMap.size > 0) {
+      // Get the rules which are not longer dependended upon
+      leafs = (
+        Array.from(dependentsMap.entries())
+        .filter(([index, dependents]) => dependents.size === 0)
+        .map(([index, dependents]) => index)
+      );
+
+      // Find the next rule
+      if (leafs.length > 0) {
+        // We do have available rules, use the smallest index
+        // i.e. use the original order to break ties
+        ruleIndexToAdd = Math.min(...leafs);
+      } else {
+        // No leaf available, break the cycle by adding the smallest un-printed rule
+        ruleIndexToAdd = Math.min(...dependentsMap.keys());
+      }
+
+      // Add the selected rule, remove it from Kahn's algo data structures
+      sortedRules.push(rules[ruleIndexToAdd]);
+      dependentsMap.delete(ruleIndexToAdd);
+      dependentsMap.forEach(dependents => dependents.delete(ruleIndexToAdd));
+    }
+
+    return sortedRules;
   }
 
   // III. Rule formatting
@@ -676,10 +755,11 @@ FormattedGrammar
     = grammar:Grammar {
         // console.log(JSON.stringify(grammar, null, 2));
         const specializations = processTemplates(error, DEFINITIONS);
-        // Merge rules and specializations in order
-        const rules = [];
+        // Merge rules and specializations, in order
+        // Keep the first rule the first item
+        const rules = [Array.from(DEFINITIONS.values()).filter(def => def.type === "rule")[0]];
         for (const def of DEFINITIONS.values()) {
-          if (def.type === "rule") {
+          if ((def.type === "rule") && !rules.includes(def)) {
             rules.push(def);
           } else if (def.type === "template") {
             rules.push(...specializations.filter(spe => spe.templateName === def.name));
@@ -768,7 +848,7 @@ Rule
     }
 
 Template
-  = name:IdentifierName "<" parameters:TemplateParams ">" __
+  = name:IdentifierName __ "<" parameters:TemplateParams ">" __
     displayName:(@StringLiteral __)?
     "=" __
     expression:Expression EOS
@@ -943,7 +1023,7 @@ PrimaryExpression
     }
 
 TemplateSpecializationExpression
-  = name:IdentifierName "<" args:SpecializationArgs ">" !(__ (StringLiteral __)? "=") {
+  = name:IdentifierName __ "<" args:SpecializationArgs ">" !(__ (StringLiteral __)? "=") {
       return {
         type: "specialization",
         name: name[0],
@@ -963,7 +1043,7 @@ SpecializationArgument
   / TemplateSpecializationExpression
 
 RuleReferenceExpression
-  = name:IdentifierName !"<" !(__ (StringLiteral __)? "=") {
+  = name:IdentifierName __ !"<" !(__ (StringLiteral __)? "=") {
       return {
         type: "rule_ref",
         name: name[0],

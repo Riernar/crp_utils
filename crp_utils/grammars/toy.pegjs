@@ -1,6 +1,3 @@
-Start
-    = Template1<Template2<RuleA>, RuleB>
-    / RuleB
 
 Template1<T, U>
     = T U T
@@ -8,8 +5,15 @@ Template1<T, U>
 Template2<T>
     = T T
 
+Start
+    = Template1<Template2<RuleA>, RuleB>
+    / RuleB
+
 RuleA
     = "a"
 
 RuleB
     = "b"
+
+
+
